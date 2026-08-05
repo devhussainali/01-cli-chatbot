@@ -71,7 +71,6 @@ python chatbot.py
 
 ## 💻 Usage Example
 
-==================================================
 CLI Chatbot - powered by Groq (Llama 3.3)
 Type /help to see available commands
 You: Here's my essay: "Education is very important thing for progress of nation and without education no country can develop..."
