@@ -8,6 +8,11 @@ import os
 import json
 from dotenv import load_dotenv
 from groq import Groq
+from colorama import Fore, Style, init
+
+# init() makes colors work correctly on Windows terminals too.
+# autoreset=True means we don't have to manually reset color after every print.
+init(autoreset=True)
 
 # ---- Setup ----
 load_dotenv()
@@ -32,8 +37,8 @@ Always respond in a friendly, mentor-like tone. Use simple English mixed with Ro
 
 conversation_history = []
 
-HELP_TEXT = """
-Available Commands:
+HELP_TEXT = f"""
+{Fore.YELLOW}Available Commands:{Style.RESET_ALL}
   /help            Show this help message
   /clear           Clear the current conversation history
   /save <name>     Save current conversation to a custom file (e.g. /save essay1)
@@ -53,7 +58,7 @@ def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
             conversation_history = json.load(f)
-        print(f"Bot: Purani chat history load ho gayi ({len(conversation_history)} messages) 📂")
+        print(Fore.CYAN + f"Bot: Purani chat history load ho gayi ({len(conversation_history)} messages) 📂")
     else:
         conversation_history = []
 
@@ -69,7 +74,8 @@ def get_ai_response_streamed(user_message):
         stream=True
     )
 
-    print("\nBot: ", end="", flush=True)
+    # Bot label in green, response text in default color (easier to read long feedback)
+    print(f"\n{Fore.GREEN}Bot: {Style.RESET_ALL}", end="", flush=True)
     full_reply = ""
 
     for chunk in stream:
@@ -100,18 +106,18 @@ def handle_command(user_input):
     if command == "/clear":
         conversation_history.clear()
         save_history()
-        print("Bot: Chat history clear ho gayi. Fresh start! 🧹")
+        print(Fore.CYAN + "Bot: Chat history clear ho gayi. Fresh start! 🧹")
         return True
 
     if command == "/save":
         if len(command_parts) < 2:
-            print("Bot: Please provide a filename. Example: /save essay1")
+            print(Fore.RED + "Bot: Please provide a filename. Example: /save essay1")
             return True
         filename = command_parts[1].strip()
         if not filename.endswith(".json"):
             filename += ".json"
         save_history(filename)
-        print(f"Bot: Conversation saved to '{filename}' ✅")
+        print(Fore.CYAN + f"Bot: Conversation saved to '{filename}' ✅")
         return True
 
     return False  # Not a command — treat as a normal chat message
@@ -120,16 +126,17 @@ def handle_command(user_input):
 def main():
     load_history()
 
-    print("=" * 50)
-    print("CLI Chatbot - powered by Groq (Llama 3.3)")
-    print("Type /help to see available commands")
-    print("=" * 50)
+    print(Fore.MAGENTA + "=" * 50)
+    print(Fore.MAGENTA + "CLI Chatbot - powered by Groq (Llama 3.3)")
+    print(Fore.MAGENTA + "Type /help to see available commands")
+    print(Fore.MAGENTA + "=" * 50)
 
     while True:
-        user_input = input("\nYou: ").strip()
+        # User's own input prompt in blue/cyan so it's visually distinct from bot replies
+        user_input = input(f"\n{Fore.BLUE}You: {Style.RESET_ALL}").strip()
 
         if user_input.lower() in ["quit", "exit"]:
-            print("Bot: Khuda Hafiz! 👋")
+            print(Fore.CYAN + "Bot: Khuda Hafiz! 👋")
             break
 
         if not user_input:
@@ -142,7 +149,7 @@ def main():
         try:
             get_ai_response_streamed(user_input)
         except Exception as e:
-            print(f"Error: {e}")
+            print(Fore.RED + f"Error: {e}")
 
 
 if __name__ == "__main__":
