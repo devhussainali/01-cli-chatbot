@@ -77,14 +77,27 @@ def get_ai_response_streamed(user_message):
     # Bot label in green, response text in default color (easier to read long feedback)
     print(f"\n{Fore.GREEN}Bot: {Style.RESET_ALL}", end="", flush=True)
     full_reply = ""
+    usage_info = None
 
     for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
+        if chunk.choices and chunk.choices[0].delta.content:
+            delta = chunk.choices[0].delta.content
             print(delta, end="", flush=True)
             full_reply += delta
 
+        # Groq attaches usage stats to a special "x_groq" field on the final chunk
+        # (this is Groq-specific — OpenAI's SDK uses a different mechanism)
+        groq_meta = getattr(chunk, "x_groq", None)
+        if groq_meta is not None:
+            usage_info = getattr(groq_meta, "usage", None)
+
     print()
+
+    if usage_info:
+        print(
+            f"{Fore.YELLOW}[tokens: prompt={usage_info.prompt_tokens}, "
+            f"response={usage_info.completion_tokens}, total={usage_info.total_tokens}]"
+        )
 
     conversation_history.append({"role": "assistant", "content": full_reply})
     save_history()
