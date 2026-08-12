@@ -5,6 +5,11 @@ built with Streamlit. Backed by Llama 3.3 via the Groq API.
 """
 
 import os
+import re
+import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
@@ -12,8 +17,122 @@ from groq import Groq
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+SENDER_APP_PASSWORD = os.getenv("SENDER_APP_PASSWORD")
+
 # Change this to customize the assistant's behavior/persona.
-SYSTEM_PROMPT = "You are a helpful, knowledgeable, and friendly AI assistant. Give clear, well-structured answers."
+BASE_SYSTEM_PROMPT = "You are a helpful, knowledgeable, and friendly AI assistant. Give clear, well-structured answers."
+
+MEMORY_FILE = "user_memory.json"
+
+# Simple patterns to auto-detect a name mentioned in conversation.
+# This is a lightweight heuristic, not a full NLP solution — good enough for
+# understanding how persistent memory works.
+NAME_PATTERNS = [
+    r"\bmy name is ([A-Za-z]+)",
+    r"\bi am ([A-Za-z]+)(?:\s|$|,|\.)",
+    r"\bcall me ([A-Za-z]+)",
+    r"\bmujhe ([A-Za-z]+) kehte",
+]
+
+
+def load_memory():
+    """Load saved facts about the user from disk."""
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_memory(memory):
+    """Persist facts about the user to disk."""
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory, f, indent=2)
+
+
+def extract_and_store_facts(user_message, memory):
+    """
+    Looks at the user's message for things worth remembering:
+    - Explicit: 'remember: <fact>' or 'remember that <fact>'
+    - Implicit: name mentions like 'my name is X'
+    Returns True if memory was updated.
+    """
+    updated = False
+    lower_msg = user_message.lower()
+
+    # Explicit "remember: ..." or "remember that ..." command
+    explicit_match = re.search(r"remember(?:\s+that)?[:\s]+(.*)", lower_msg)
+    if explicit_match:
+        fact = explicit_match.group(1).strip()
+        if fact:
+            memory.setdefault("notes", [])
+            if fact not in memory["notes"]:
+                memory["notes"].append(fact)
+                updated = True
+
+    # Implicit name detection
+    for pattern in NAME_PATTERNS:
+        match = re.search(pattern, user_message, re.IGNORECASE)
+        if match:
+            name = match.group(1).capitalize()
+            if memory.get("name") != name:
+                memory["name"] = name
+                updated = True
+            break
+
+    if updated:
+        save_memory(memory)
+
+    return updated
+
+
+def send_transcript_email(recipient_email, conversation_history):
+    """
+    Sends the conversation transcript to the given email address using Gmail's SMTP server.
+    Requires SENDER_EMAIL and SENDER_APP_PASSWORD to be set in .env
+    (SENDER_APP_PASSWORD must be a Gmail "App Password", not your normal password).
+    """
+    if not SENDER_EMAIL or not SENDER_APP_PASSWORD:
+        return False, "Email is not configured. Add SENDER_EMAIL and SENDER_APP_PASSWORD to your .env file."
+
+    transcript = "\n\n".join(
+        f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+        for m in conversation_history
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = SENDER_EMAIL
+    msg["To"] = recipient_email
+    msg["Subject"] = "Your AI Assistant Conversation Transcript"
+    msg.attach(MIMEText(transcript, "plain"))
+
+    try:
+        # Gmail's SMTP server, using TLS encryption on port 587
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
+            server.send_message(msg)
+        return True, f"Transcript sent to {recipient_email} ✅"
+    except Exception as e:
+        return False, f"Failed to send email: {e}"
+
+
+def build_system_prompt(memory):
+    """Combine the base persona with any known facts about the user."""
+    if not memory:
+        return BASE_SYSTEM_PROMPT
+
+    facts_lines = []
+    if memory.get("name"):
+        facts_lines.append(f"- The user's name is {memory['name']}.")
+    for note in memory.get("notes", []):
+        facts_lines.append(f"- {note}")
+
+    if not facts_lines:
+        return BASE_SYSTEM_PROMPT
+
+    facts_block = "\n".join(facts_lines)
+    return f"{BASE_SYSTEM_PROMPT}\n\nHere is what you know about the user from past conversations:\n{facts_block}\n\nUse this naturally when relevant, without explicitly saying 'according to my memory'."
 
 st.set_page_config(page_title="AI Assistant", page_icon="💬", layout="centered")
 
@@ -126,6 +245,8 @@ if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
 if "total_tokens" not in st.session_state:
     st.session_state.total_tokens = 0
+if "user_memory" not in st.session_state:
+    st.session_state.user_memory = load_memory()
 
 # ---- Sidebar ----
 with st.sidebar:
@@ -163,6 +284,36 @@ with st.sidebar:
             use_container_width=True
         )
 
+        st.markdown("---")
+        st.markdown("## 📧 Send Transcript")
+        recipient = st.text_input("Recipient email", placeholder="someone@example.com")
+        if st.button("Send via Email", use_container_width=True):
+            if recipient:
+                success, message = send_transcript_email(recipient, st.session_state.conversation_history)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+            else:
+                st.warning("Please enter a recipient email first.")
+
+    st.markdown("---")
+    st.markdown("## 🧠 Memory")
+
+    mem = st.session_state.user_memory
+    if mem.get("name") or mem.get("notes"):
+        if mem.get("name"):
+            st.markdown(f"**Name:** {mem['name']}")
+        for note in mem.get("notes", []):
+            st.markdown(f"- {note}")
+    else:
+        st.markdown("*Nothing remembered yet. Try saying 'my name is...' or 'remember: I like chess'.*")
+
+    if st.button("🗑️ Forget everything", use_container_width=True):
+        st.session_state.user_memory = {}
+        save_memory({})
+        st.rerun()
+
 # ---- Render conversation ----
 for message in st.session_state.conversation_history:
     avatar = "🧑" if message["role"] == "user" else "🤖"
@@ -173,15 +324,19 @@ for message in st.session_state.conversation_history:
 user_input = st.chat_input("Message the assistant...")
 
 if user_input:
+    # Check the message for anything worth remembering permanently
+    extract_and_store_facts(user_input, st.session_state.user_memory)
+
     st.session_state.conversation_history.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="🧑"):
         st.markdown(user_input)
 
     with st.chat_message("assistant", avatar="🤖"):
+        current_system_prompt = build_system_prompt(st.session_state.user_memory)
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             max_tokens=1024,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + st.session_state.conversation_history,
+            messages=[{"role": "system", "content": current_system_prompt}] + st.session_state.conversation_history,
             stream=True
         )
 
