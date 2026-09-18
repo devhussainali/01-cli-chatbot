@@ -68,7 +68,7 @@ def get_ai_response_streamed(user_message):
     conversation_history.append({"role": "user", "content": user_message})
 
     stream = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-20b",
         max_tokens=1024,
         messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history,
         stream=True

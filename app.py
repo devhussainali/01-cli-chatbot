@@ -334,7 +334,7 @@ if user_input:
     with st.chat_message("assistant", avatar="🤖"):
         current_system_prompt = build_system_prompt(st.session_state.user_memory)
         stream = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-20b",
             max_tokens=1024,
             messages=[{"role": "system", "content": current_system_prompt}] + st.session_state.conversation_history,
             stream=True
